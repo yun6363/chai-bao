@@ -21,11 +21,6 @@ jobs:
       - name: Install decompilers
         run: |
           pip install uncompyle6
-          # 如需 pycdc，取消下面注释
-          # sudo apt-get update && sudo apt-get install -y cmake git g++
-          # git clone https://github.com/zrax/pycdc.git
-          # cd pycdc && cmake . && make && sudo make install
-          # cd ..
 
       - name: Download pyinstxtractor
         run: |
@@ -46,16 +41,7 @@ jobs:
             echo "Processing $pyc_file"
             
             if [ -f "struct" ]; then
-              # 使用 python -c 直接执行修复脚本，避免 heredoc 的 YAML 语法问题
-              python -c "
-import sys
-with open('struct', 'rb') as f_s:
-    magic = f_s.read(4)
-with open(sys.argv[1], 'rb') as f_pyc:
-    content = f_pyc.read()
-with open(sys.argv[1], 'wb') as f_out:
-    f_out.write(magic + content)
-" "$pyc_file"
+              python -c "import sys; f_s=open('struct','rb'); magic=f_s.read(4); f_s.close(); f_pyc=open(sys.argv[1],'rb'); content=f_pyc.read(); f_pyc.close(); f_out=open(sys.argv[1],'wb'); f_out.write(magic+content); f_out.close()" "$pyc_file"
             else
               echo "struct file not found, skipping header fix for $pyc_file"
             fi
