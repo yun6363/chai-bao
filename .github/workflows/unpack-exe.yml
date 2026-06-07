@@ -1,59 +1,42 @@
-# .github/workflows/unpack-exe.yml
-
 name: Python EXE Unpacker
 
-# 指定工作流的触发方式。这里配置为：
 on:
-  # 1. 允许你手动在 GitHub Actions 页面点击按钮触发
   workflow_dispatch:
-  # 2. 当你推送代码（例如上传了待拆包的 exe 文件）时自动触发
   push:
     branches: [ "main" ]
 
 jobs:
   unpack:
-    runs-on: ubuntu-latest  # 使用最新版的 Ubuntu 环境
+    runs-on: ubuntu-latest
 
     steps:
-      # 步骤 1：检出你的仓库代码，让 Action 能访问到你的文件
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤 2：设置 Python 环境。将版本改为目标 exe 文件对应的 Python 版本
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
 
-      # 步骤 3：安装拆包所需的反编译工具
       - name: Install decompilers
         run: |
-          # 安装 uncompyle6
           pip install uncompyle6
-          # 下载 pycdc 预编译版本 (如果目标 Python 版本较高，推荐使用 pycdc)
-          # 注意：pycdc 是 C++ 项目，需从源码编译，此处为示例展示流程
+          # 如需 pycdc，取消下面注释
           # sudo apt-get update && sudo apt-get install -y cmake git g++
           # git clone https://github.com/zrax/pycdc.git
           # cd pycdc && cmake . && make && sudo make install
           # cd ..
 
-      # 步骤 4：下载核心解包工具 pyinstxtractor
       - name: Download pyinstxtractor
         run: |
           wget https://raw.githubusercontent.com/extremecoders-re/pyinstxtractor/master/pyinstxtractor.py
-          # 赋予执行权限
           chmod +x pyinstxtractor.py
 
-      # 步骤 5：执行拆包
-      # 假设你的 exe 文件放在了仓库根目录的 'incoming' 文件夹下，名为 'target.exe'
       - name: Run pyinstxtractor to extract EXE
         run: |
-          # 创建输出目录
           mkdir -p output
-          # 执行拆包，-o 指定输出目录
           python pyinstxtractor.py incoming/caiji023.exe -o output/extracted
 
-            # 步骤 6：修复 .pyc 文件头部并反编译
       - name: Fix headers and decompile
         run: |
           cd output/extracted
@@ -62,9 +45,9 @@ jobs:
           for pyc_file in *.pyc; do
             echo "Processing $pyc_file"
             
-            # 1. 修复头部：将修复逻辑写入临时 Python 脚本再执行
             if [ -f "struct" ]; then
-              cat > fix_header.py << 'EOF'
+              # 使用 python -c 直接执行修复脚本，避免 heredoc 的 YAML 语法问题
+              python -c "
 import sys
 with open('struct', 'rb') as f_s:
     magic = f_s.read(4)
@@ -72,19 +55,15 @@ with open(sys.argv[1], 'rb') as f_pyc:
     content = f_pyc.read()
 with open(sys.argv[1], 'wb') as f_out:
     f_out.write(magic + content)
-EOF
-              python fix_header.py "$pyc_file"
-              rm fix_header.py
+" "$pyc_file"
             else
               echo "struct file not found, skipping header fix for $pyc_file"
             fi
 
-            # 2. 反编译
             uncompyle6 "$pyc_file" > "../source/${pyc_file%.pyc}.py" || \
-            echo "uncompyle6 failed for $pyc_file, trying pycdc..."
+            echo "uncompyle6 failed for $pyc_file"
           done
 
-      # 步骤 7：上传最终反编译出的源码，作为构建产物
       - name: Upload source code artifact
         uses: actions/upload-artifact@v4
         with:
