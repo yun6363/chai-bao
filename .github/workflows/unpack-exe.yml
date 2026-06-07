@@ -21,94 +21,69 @@ jobs:
       - name: Install decompilers
         run: |
           pip install uncompyle6
-          # 可选：安装 pycdc 备用（如需支持更高 Python 版本，可取消注释）
-          # sudo apt-get update && sudo apt-get install -y cmake git g++
-          # git clone https://github.com/zrax/pycdc.git && cd pycdc && cmake . && make && sudo make install && cd ..
 
       - name: Download pyinstxtractor
         run: |
           wget https://raw.githubusercontent.com/extremecoders-re/pyinstxtractor/master/pyinstxtractor.py
           chmod +x pyinstxtractor.py
 
-      - name: List incoming directory (debug)
-        run: ls -la incoming/ || echo "incoming 目录不存在"
+      - name: List incoming directory
+        run: |
+          echo "Contents of incoming:"
+          ls -la incoming/ || echo "incoming directory not found"
 
       - name: Extract with pyinstxtractor
         id: extract
-        continue-on-error: true
         run: |
-          # pyinstxtractor 不支持 -o，默认生成 <exe名>_extracted
           python pyinstxtractor.py incoming/caiji023.exe
-          # 检查默认输出目录是否存在
           if [ -d "caiji023.exe_extracted" ]; then
-            echo "✅ 解包成功，正在重命名目录..."
+            echo "Extraction successful, renaming directory..."
             mkdir -p output
             mv caiji023.exe_extracted output/extracted
-            echo "success=true" >> $GITHUB_OUTPUT
+            echo "status=success" >> $GITHUB_OUTPUT
           else
-            echo "❌ 解包失败，未生成 caiji023.exe_extracted"
-            echo "success=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Fallback: try pyinstxtractor-ng (if original failed)
-        if: steps.extract.outputs.success != 'true'
-        run: |
-          pip install pyinstxtractor-ng
-          rm -rf caiji023.exe_extracted output
-          python -m pyinstxtractor-ng incoming/caiji023.exe -o output/extracted
-          if [ -d "output/extracted" ]; then
-            echo "✅ pyinstxtractor-ng 解包成功"
-            echo "success=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ 两种工具均失败"
-            echo "success=false" >> $GITHUB_OUTPUT
+            echo "Extraction failed"
+            echo "status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
 
       - name: Fix headers and decompile
-        if: steps.extract.outputs.success == 'true' || success()  # 如果上一步设置了 success 则运行
+        if: steps.extract.outputs.status == 'success'
         run: |
           cd output/extracted
           mkdir -p ../source
-          
-          # 修复所有 .pyc 文件的头部（如果 struct 文件存在）
           for pyc_file in *.pyc; do
             echo "Processing $pyc_file"
             if [ -f "struct" ]; then
               python -c "import sys; f_s=open('struct','rb'); magic=f_s.read(4); f_s.close(); f_pyc=open(sys.argv[1],'rb'); content=f_pyc.read(); f_pyc.close(); f_out=open(sys.argv[1],'wb'); f_out.write(magic+content); f_out.close()" "$pyc_file"
-            else
-              echo "警告: struct 文件不存在，跳过头部修复"
             fi
-            # 反编译
-            uncompyle6 "$pyc_file" > "../source/${pyc_file%.pyc}.py" || echo "uncompyle6 失败: $pyc_file"
+            uncompyle6 "$pyc_file" > "../source/${pyc_file%.pyc}.py" || echo "uncompyle6 failed for $pyc_file"
           done
-          
-          echo "反编译完成，源码保存到 ../source/"
+          echo "Decompilation finished. Source code in ../source/"
 
       - name: Upload decompiled source code
-        if: always() && (steps.extract.outputs.success == 'true' || success())
+        if: steps.extract.outputs.status == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: decompiled-source-code
           path: output/source/
 
-      - name: Upload extraction logs if failed
-        if: steps.extract.outputs.success != 'true' && failure()
+      - name: Upload extraction logs on failure
+        if: steps.extract.outputs.status != 'success'
         uses: actions/upload-artifact@v4
         with:
           name: extraction-failure-logs
           path: |
-            *.log
             pyinstxtractor.py
             caiji023.exe_extracted/
             output/
           if-no-files-found: ignore
 
-      - name: Final failure message
-        if: steps.extract.outputs.success != 'true'
+      - name: Failure message
+        if: steps.extract.outputs.status != 'success'
         run: |
-          echo "❌ 所有解包工具均失败。可能原因："
-          echo "1. 该 EXE 不是用 PyInstaller 打包的（尝试 py2exe、Nuitka 等）"
-          echo "2. 文件被加壳或加密（需先用 upx -d 脱壳）"
-          echo "3. PyInstaller 版本过新，等待工具更新"
+          echo "❌ Extraction failed. Possible reasons:"
+          echo "  - Not a PyInstaller executable"
+          echo "  - File is encrypted or packed (try UPX)"
+          echo "  - PyInstaller version is too new"
           exit 1
