@@ -1,57 +1,24 @@
-name: Python EXE Unpacker
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [ "main" ]
-
-jobs:
-  unpack:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-
-      - name: Install decompilers
+      - name: List incoming directory (debug)
         run: |
-          pip install uncompyle6
-
-      - name: Download pyinstxtractor
-        run: |
-          wget https://raw.githubusercontent.com/extremecoders-re/pyinstxtractor/master/pyinstxtractor.py
-          chmod +x pyinstxtractor.py
+          echo "Contents of incoming:"
+          ls -la incoming/ || echo "incoming directory not found!"
 
       - name: Run pyinstxtractor to extract EXE
         run: |
           mkdir -p output
           python pyinstxtractor.py incoming/caiji023.exe -o output/extracted
+          # 打印 pyinstxtractor 的退出码
+          echo "pyinstxtractor exit code: $?"
+          # 查看 output 目录下生成了什么
+          ls -la output/ || echo "output directory empty or missing"
 
-      - name: Fix headers and decompile
+      - name: Debug output/extracted
         run: |
-          cd output/extracted
-          mkdir -p ../source
-          
-          for pyc_file in *.pyc; do
-            echo "Processing $pyc_file"
-            
-            if [ -f "struct" ]; then
-              python -c "import sys; f_s=open('struct','rb'); magic=f_s.read(4); f_s.close(); f_pyc=open(sys.argv[1],'rb'); content=f_pyc.read(); f_pyc.close(); f_out=open(sys.argv[1],'wb'); f_out.write(magic+content); f_out.close()" "$pyc_file"
-            else
-              echo "struct file not found, skipping header fix for $pyc_file"
-            fi
-
-            uncompyle6 "$pyc_file" > "../source/${pyc_file%.pyc}.py" || \
-            echo "uncompyle6 failed for $pyc_file"
-          done
-
-      - name: Upload source code artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: decompiled-source-code
-          path: output/source/
+          if [ -d "output/extracted" ]; then
+            echo "output/extracted exists, contents:"
+            ls -la output/extracted/
+          else
+            echo "output/extracted does NOT exist"
+            # 如果存在 pyinstxtractor 的错误日志，打印出来
+            find . -name "*.log" -o -name "*error*" | xargs cat 2>/dev/null || true
+          fi
