@@ -53,41 +53,35 @@ jobs:
           # 执行拆包，-o 指定输出目录
           python pyinstxtractor.py incoming/caiji023.exe -o output/extracted
 
-      # 步骤 6：修复 .pyc 文件头部并反编译
+            # 步骤 6：修复 .pyc 文件头部并反编译
       - name: Fix headers and decompile
         run: |
-          # 进入 pyc 文件所在目录
           cd output/extracted
-          # 用于存放最终源码的目录
           mkdir -p ../source
           
-          # 这里假设 .pyc 文件都在 output/extracted 目录下
-          # 循环处理所有 .pyc 文件（不包含结构文件）
           for pyc_file in *.pyc; do
             echo "Processing $pyc_file"
             
-            # 1. 修复头部（关键步骤！）
-            # 从同目录下的 'struct' 文件中复制前4个字节，补充到 .pyc 文件开头
-            # 此方法适用于 Python 3.7 及更早版本，若使用 Python 3.9+ 请查阅最新资料
+            # 1. 修复头部：将修复逻辑写入临时 Python 脚本再执行
             if [ -f "struct" ]; then
-              python -c "
+              cat > fix_header.py << 'EOF'
 import sys
 with open('struct', 'rb') as f_s:
     magic = f_s.read(4)
-with open('$pyc_file', 'rb') as f_pyc:
+with open(sys.argv[1], 'rb') as f_pyc:
     content = f_pyc.read()
-with open('$pyc_file', 'wb') as f_out:
+with open(sys.argv[1], 'wb') as f_out:
     f_out.write(magic + content)
-" || echo "Header fix failed for $pyc_file"
+EOF
+              python fix_header.py "$pyc_file"
+              rm fix_header.py
             else
               echo "struct file not found, skipping header fix for $pyc_file"
             fi
 
-            # 2. 反编译：首选 uncompyle6
+            # 2. 反编译
             uncompyle6 "$pyc_file" > "../source/${pyc_file%.pyc}.py" || \
             echo "uncompyle6 failed for $pyc_file, trying pycdc..."
-            # 备用方案：如果 uncompyle6 失败，尝试 pycdc（需预装）
-            # pycdc "$pyc_file" > "../source/${pyc_file%.pyc}.py" 2>/dev/null || echo "All decompilers failed for $pyc_file"
           done
 
       # 步骤 7：上传最终反编译出的源码，作为构建产物
