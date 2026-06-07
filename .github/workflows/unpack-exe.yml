@@ -51,7 +51,7 @@ jobs:
           # 创建输出目录
           mkdir -p output
           # 执行拆包，-o 指定输出目录
-          python pyinstxtractor.py incoming/target.exe -o output/extracted
+          python pyinstxtractor.py incoming/caiji023.exe -o output/extracted
 
       # 步骤 6：修复 .pyc 文件头部并反编译
       - name: Fix headers and decompile
