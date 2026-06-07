@@ -18,55 +18,104 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install decompilers
-        run: pip install uncompyle6
-
-      - name: Download pyinstxtractor
+      - name: Install decompilers and tools
         run: |
-          wget https://raw.githubusercontent.com/extremecoders-re/pyinstxtractor/master/pyinstxtractor.py
-          chmod +x pyinstxtractor.py
+          pip install uncompyle6
+          # 安装 pyinstxtractor-ng 作为备选
+          pip install pyinstxtractor-ng
 
       - name: List incoming directory (debug)
-        run: ls -la incoming/ || echo "incoming directory not found!"
-
-      - name: Run pyinstxtractor to extract EXE
         run: |
-          echo "当前目录内容："
-          ls -la
-          echo "incoming 目录内容："
+          echo "=== incoming 目录内容 ==="
           ls -la incoming/ || echo "incoming 目录不存在！"
-          echo "开始执行 pyinstxtractor..."
+
+      - name: Try pyinstxtractor (original)
+        id: extract1
+        continue-on-error: true
+        run: |
           mkdir -p output
-          python pyinstxtractor.py incoming/caiji023.exe -o output/extracted 2>&1
-          echo "pyinstxtractor 退出码: $?"
-          echo "output 目录内容："
-          ls -la output/ || echo "output 目录为空"
+          echo "--- 使用原版 pyinstxtractor ---"
+          wget -q https://raw.githubusercontent.com/extremecoders-re/pyinstxtractor/master/pyinstxtractor.py
+          python pyinstxtractor.py incoming/caiji023.exe -o output/extracted
+          echo "原版 pyinstxtractor 退出码: $?"
           if [ -d "output/extracted" ]; then
-            echo "output/extracted 目录内容："
-            ls -la output/extracted/
+            echo "✅ 原版解包成功"
+            echo "success=true" >> $GITHUB_OUTPUT
           else
-            echo "output/extracted 目录不存在！"
+            echo "❌ 原版解包失败，output/extracted 未生成"
+            echo "success=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Try pyinstxtractor-ng (fallback)
+        if: steps.extract1.outputs.success != 'true'
+        id: extract2
+        continue-on-error: true
+        run: |
+          echo "--- 使用 pyinstxtractor-ng (备选) ---"
+          rm -rf output/extracted
+          python -m pyinstxtractor-ng incoming/caiji023.exe -o output/extracted
+          if [ -d "output/extracted" ]; then
+            echo "✅ pyinstxtractor-ng 解包成功"
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 两种工具均失败"
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Debug output/extracted content (if success)
+        if: steps.extract2.outputs.success == 'true' || steps.extract1.outputs.success == 'true'
+        run: |
+          echo "=== output/extracted 内容 ==="
+          ls -la output/extracted/
+          echo "=== 查找主 pyc 文件 ==="
+          find output/extracted -name "*.pyc" -type f
 
       - name: Fix headers and decompile
+        if: steps.extract2.outputs.success == 'true' || steps.extract1.outputs.success == 'true'
         run: |
-          if [ -d "output/extracted" ]; then
-            cd output/extracted
-            mkdir -p ../source
-            for pyc_file in *.pyc; do
-              echo "Processing $pyc_file"
-              if [ -f "struct" ]; then
-                python -c "import sys; f_s=open('struct','rb'); magic=f_s.read(4); f_s.close(); f_pyc=open(sys.argv[1],'rb'); content=f_pyc.read(); f_pyc.close(); f_out=open(sys.argv[1],'wb'); f_out.write(magic+content); f_out.close()" "$pyc_file"
-              fi
-              uncompyle6 "$pyc_file" > "../source/${pyc_file%.pyc}.py" || echo "uncompyle6 failed for $pyc_file"
-            done
-          else
-            echo "Skipping decompile because output/extracted does not exist"
-            exit 1
-          fi
+          cd output/extracted
+          mkdir -p ../source
+          
+          # 处理所有 .pyc 文件
+          for pyc_file in *.pyc; do
+            echo "Processing $pyc_file"
+            
+            # 修复头部（如果 struct 文件存在）
+            if [ -f "struct" ]; then
+              python -c "import sys; f_s=open('struct','rb'); magic=f_s.read(4); f_s.close(); f_pyc=open(sys.argv[1],'rb'); content=f_pyc.read(); f_pyc.close(); f_out=open(sys.argv[1],'wb'); f_out.write(magic+content); f_out.close()" "$pyc_file"
+            else
+              echo "警告: struct 文件不存在，跳过头部修复"
+            fi
+            
+            # 反编译
+            uncompyle6 "$pyc_file" > "../source/${pyc_file%.pyc}.py" || echo "uncompyle6 失败: $pyc_file"
+          done
+          
+          echo "反编译完成，源码保存到 ../source/"
 
-      - name: Upload source code artifact
+      - name: Upload decompiled source code
+        if: always() && (steps.extract2.outputs.success == 'true' || steps.extract1.outputs.success == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: decompiled-source-code
           path: output/source/
+
+      - name: Upload extraction logs (if failed)
+        if: (steps.extract1.outputs.success != 'true') && (steps.extract2.outputs.success != 'true')
+        uses: actions/upload-artifact@v4
+        with:
+          name: extraction-failure-logs
+          path: |
+            output/
+            pyinstxtractor.py
+            *.log
+          if-no-files-found: ignore
+
+      - name: Final status
+        if: (steps.extract1.outputs.success != 'true') && (steps.extract2.outputs.success != 'true')
+        run: |
+          echo "❌ 所有解包工具均失败。可能原因："
+          echo "1. 该 EXE 不是用 PyInstaller 打包的（尝试 py2exe 等其他工具）"
+          echo "2. 文件被加壳或加密（需先用 upx -d 脱壳）"
+          echo "3. PyInstaller 版本过新，等待 pyinstxtractor 更新"
+          exit 1
