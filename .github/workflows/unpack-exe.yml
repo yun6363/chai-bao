@@ -31,17 +31,21 @@ jobs:
 
       - name: Run pyinstxtractor to extract EXE
         run: |
+          echo "当前目录内容："
+          ls -la
+          echo "incoming 目录内容："
+          ls -la incoming/ || echo "incoming 目录不存在！"
+          echo "开始执行 pyinstxtractor..."
           mkdir -p output
-          python pyinstxtractor.py incoming/caiji023.exe -o output/extracted
-          ls -la output/
-
-      - name: Debug output/extracted
-        run: |
+          python pyinstxtractor.py incoming/caiji023.exe -o output/extracted 2>&1
+          echo "pyinstxtractor 退出码: $?"
+          echo "output 目录内容："
+          ls -la output/ || echo "output 目录为空"
           if [ -d "output/extracted" ]; then
-            echo "output/extracted exists"
+            echo "output/extracted 目录内容："
             ls -la output/extracted/
           else
-            echo "output/extracted does NOT exist"
+            echo "output/extracted 目录不存在！"
           fi
 
       - name: Fix headers and decompile
